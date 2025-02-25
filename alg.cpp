@@ -1,106 +1,92 @@
-// C++ program for implementation of Aho Corasick algorithm
-// for string matching using unique keys in an unordered_map
 #include <bits/stdc++.h>
 using namespace std;
 
-const int MAXS = 500;
-const int MAXC = 26;
+class PatternMatcher {
+private:
+    struct TrieNode {
+        unordered_map<char, TrieNode*> children;
+        TrieNode* failure = nullptr;
+        vector<int> output;
+    };
+    TrieNode* root;
+    vector<string> markers;
 
-int out[MAXS];
-int f[MAXS];
-int g[MAXS][MAXC];
-
-int buildMatchingMachine(string arr[], int k) {
-    memset(out, 0, sizeof out);
-    memset(g, -1, sizeof g);
-
-    int states = 1;
-
-    for (int i = 0; i < k; ++i) {
-        const string &word = arr[i];
-        int currentState = 0;
-
-        for (char c : word) {
-            int ch = c - 'a';
-            if (g[currentState][ch] == -1)
-                g[currentState][ch] = states++;
-            currentState = g[currentState][ch];
-        }
-        out[currentState] |= (1 << i);
+public:
+    PatternMatcher() {
+        root = new TrieNode();
     }
 
-    for (int ch = 0; ch < MAXC; ++ch)
-        if (g[0][ch] == -1)
-            g[0][ch] = 0;
+    void Init(const vector<string>& patterns) {
+        markers = patterns;
+        buildTrie();
+        buildFailureLinks();
+    }
 
-    memset(f, -1, sizeof f);
-    queue<int> q;
-
-    for (int ch = 0; ch < MAXC; ++ch) {
-        if (g[0][ch] != 0) {
-            f[g[0][ch]] = 0;
-            q.push(g[0][ch]);
+    void buildTrie() {
+        for (size_t i = 0; i < markers.size(); ++i) {
+            TrieNode* node = root;
+            for (char c : markers[i]) {
+                if (!node->children.count(c)) {
+                    node->children[c] = new TrieNode();
+                }
+                node = node->children[c];
+            }
+            node->output.push_back(i);
         }
     }
 
-    while (!q.empty()) {
-        int state = q.front();
-        q.pop();
+    void buildFailureLinks() {
+        queue<TrieNode*> q;
+        for (auto& [c, child] : root->children) {
+            child->failure = root;
+            q.push(child);
+        }
 
-        for (int ch = 0; ch < MAXC; ++ch) {
-            if (g[state][ch] != -1) {
-                int failure = f[state];
-                while (g[failure][ch] == -1)
-                    failure = f[failure];
-                failure = g[failure][ch];
-                f[g[state][ch]] = failure;
-                out[g[state][ch]] |= out[failure];
-                q.push(g[state][ch]);
+        while (!q.empty()) {
+            TrieNode* node = q.front(); q.pop();
+            for (auto& [c, child] : node->children) {
+                TrieNode* failure = node->failure;
+                while (failure && !failure->children.count(c)) {
+                    failure = failure->failure;
+                }
+                child->failure = (failure) ? failure->children[c] : root;
+                child->output.insert(child->output.end(), child->failure->output.begin(), child->failure->output.end());
+                q.push(child);
             }
         }
     }
-    return states;
-}
 
-int findNextState(int currentState, char nextInput) {
-    int ch = nextInput - 'a';
-    while (g[currentState][ch] == -1)
-        currentState = f[currentState];
-    return g[currentState][ch];
-}
+    vector<bool> Search(const string& text) {
+        vector<bool> result(markers.size(), false);
+        TrieNode* node = root;
 
-void searchWords(string arr[], int k, string text, unordered_map<string, int> &resultDict) {
-    buildMatchingMachine(arr, k);
-    int currentState = 0;
-
-    for (int i = 0; i < k; ++i) {
-        resultDict[arr[i]] = 0;
-    }
-
-    for (int i = 0; i < text.size(); ++i) {
-        currentState = findNextState(currentState, text[i]);
-        if (out[currentState] == 0)
-            continue;
-
-        for (int j = 0; j < k; ++j) {
-            if (out[currentState] & (1 << j)) {
-                resultDict[arr[j]]++;
+        for (char c : text) {
+            while (node && !node->children.count(c)) {
+                node = node->failure;
+            }
+            node = (node) ? node->children[c] : root;
+            for (int index : node->output) {
+                result[index] = true;
             }
         }
+        return result;
     }
-}
+};
 
 int main() {
-    string arr[] = {"he", "she", "hers", "his"};
-    string text = "ahishers";
-    int k = sizeof(arr) / sizeof(arr[0]);
-    unordered_map<string, int> resultDict;
+    string genome = "ahishers";
+    vector<string> markers = {"he", "test", "she", "hers", "test2", "his"};
 
-    searchWords(arr, k, text, resultDict);
+    PatternMatcher pm;
+    pm.Init(markers);
+    vector<bool> result = pm.Search(genome);
 
-    for (const auto &entry : resultDict) {
-        cout << "Substring: " << entry.first << " - " << entry.second << endl;
+    cout << "arr[bool] = {";
+    for (size_t i = 0; i < result.size(); ++i) {
+        cout << result[i];
+        if (i != result.size() - 1) cout << ", ";
     }
+    cout << "}" << endl;
 
     return 0;
 }
