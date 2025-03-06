@@ -3,45 +3,57 @@ using namespace std;
 
 class AhoCorasick {
 private:
-    static const int MAXS = 500;
-    static const int MAXC = 26; //ch
-    int out[MAXS];
-    int f[MAXS];
-    int g[MAXS][MAXC]; //ch
+    static const int MAXC = 26;
+    vector<int> out;
+    vector<int> f;
+    vector<int> g;
+    int states;
 
 public:
-    AhoCorasick() {
-        memset(out, 0, sizeof out);
-        memset(g, -1, sizeof g);
-        memset(f, -1, sizeof f);
+    AhoCorasick() : states(1) {
+        g.resize(MAXC, -1);
+        out.push_back(0);
+        f.push_back(0);
+    }
+
+    int getIndex(int state, int ch) {
+        return state * MAXC + ch;
+    }
+
+    void ensureCapacity(int state) {
+        int requiredSize = (state + 1) * MAXC;
+        if ((int)g.size() < requiredSize) {
+            g.resize(requiredSize, -1);
+            out.resize(state + 1, 0);
+            f.resize(state + 1, 0);
+        }
     }
 
     int buildMatchingMachine(string arr[], int k) {
-        int states = 1;
-
         for (int i = 0; i < k; ++i) {
             const string &word = arr[i];
             int currentState = 0;
 
             for (char c : word) {
                 int ch = c - 'a';
-                if (g[currentState][ch] == -1)
-                    g[currentState][ch] = states++;
-                currentState = g[currentState][ch];
+                ensureCapacity(currentState);
+                if (g[getIndex(currentState, ch)] == -1) {
+                    ensureCapacity(states);
+                    g[getIndex(currentState, ch)] = states++;
+                }
+                currentState = g[getIndex(currentState, ch)];
             }
             out[currentState] |= (1 << i);
         }
 
-        for (int ch = 0; ch < MAXC; ++ch)
-            if (g[0][ch] == -1)
-                g[0][ch] = 0;
-
         queue<int> q;
-
         for (int ch = 0; ch < MAXC; ++ch) {
-            if (g[0][ch] != 0) {
-                f[g[0][ch]] = 0;
-                q.push(g[0][ch]);
+            int index = getIndex(0, ch);
+            if (g[index] != -1) {
+                f[g[index]] = 0;
+                q.push(g[index]);
+            } else {
+                g[index] = 0;
             }
         }
 
@@ -50,14 +62,14 @@ public:
             q.pop();
 
             for (int ch = 0; ch < MAXC; ++ch) {
-                if (g[state][ch] != -1) {
+                int index = getIndex(state, ch);
+                if (g[index] != -1) {
                     int failure = f[state];
-                    while (g[failure][ch] == -1)
+                    while (g[getIndex(failure, ch)] == -1 && failure != 0)
                         failure = f[failure];
-                    failure = g[failure][ch];
-                    f[g[state][ch]] = failure;
-                    out[g[state][ch]] |= out[failure];
-                    q.push(g[state][ch]);
+                    f[g[index]] = g[getIndex(failure, ch)];
+                    out[g[index]] |= out[f[g[index]]];
+                    q.push(g[index]);
                 }
             }
         }
@@ -66,9 +78,9 @@ public:
 
     int findNextState(int currentState, char nextInput) {
         int ch = nextInput - 'a';
-        while (g[currentState][ch] == -1)
+        while (g[getIndex(currentState, ch)] == -1 && currentState != 0)
             currentState = f[currentState];
-        return g[currentState][ch];
+        return g[getIndex(currentState, ch)];
     }
 
     void searchWords(string arr[], int k, string text, unordered_map<string, int> &resultDict) {
