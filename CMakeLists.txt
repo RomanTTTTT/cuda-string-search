@@ -4,4 +4,4 @@ project(cuda_string_search)
 set(CMAKE_CXX_STANDARD 14)
 
 add_executable(cuda_string_search
-    alg.cpp)
+    alg.cpp cuda_reduce.cu)
