@@ -1,4 +1,5 @@
 #include <iostream>
+#include <vector>
 #include <cuda_runtime.h>
 
 #define THREADS_PER_BLOCK 256
@@ -26,24 +27,20 @@ __global__ void sumReduction(int *input, int *output, int n) {
 
 int main() {
     int n = 1024;
-    int *h_input, *d_input, *d_output, *h_output;
-
-    h_input = new int[n];
-    h_output = new int[(n + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK];
-
-    for (int i = 0; i < n; i++) {
-        h_input[i] = 1;
-    }
-
-    cudaMalloc(&d_input, n * sizeof(int));
-    cudaMalloc(&d_output, ((n + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK) * sizeof(int));
-
-    cudaMemcpy(d_input, h_input, n * sizeof(int), cudaMemcpyHostToDevice);
-
+    std::vector<int> h_input(n, 1);
     int numBlocks = (n + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-    sumReduction<<<numBlocks, THREADS_PER_BLOCK>>>(d_input, d_output, n);
+    std::vector<int> h_output(numBlocks);
 
-    cudaMemcpy(h_output, d_output, numBlocks * sizeof(int), cudaMemcpyDeviceToHost);
+    int *d_input, *d_output;
+    cudaMalloc(&d_input, n * sizeof(int));
+    cudaMalloc(&d_output, numBlocks * sizeof(int));
+
+    cudaMemcpy(d_input, h_input.data(), n * sizeof(int), cudaMemcpyHostToDevice);
+
+    sumReduction<<<numBlocks, THREADS_PER_BLOCK>>>(d_input, d_output, n);
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(h_output.data(), d_output, numBlocks * sizeof(int), cudaMemcpyDeviceToHost);
 
     int totalSum = 0;
     for (int i = 0; i < numBlocks; i++) {
@@ -54,8 +51,6 @@ int main() {
 
     cudaFree(d_input);
     cudaFree(d_output);
-    delete[] h_input;
-    delete[] h_output;
 
     return 0;
 }
