@@ -3,7 +3,7 @@ using namespace std;
 
 class AhoCorasick {
 private:
-    static const int MAXC = 26;
+    static const int MAXC = 5;
     vector<int> out;
     vector<int> f;
     vector<int> g;
@@ -105,18 +105,18 @@ public:
     }
 };
 
-int main() {
-    string arr[] = {"he", "test", "she", "hers", "test2", "his"};
-    string text = "ahishers";
-    int k = sizeof(arr) / sizeof(arr[0]);
-    unordered_map<string, int> resultDict;
-
-    AhoCorasick ac;
-    ac.searchWords(arr, k, text, resultDict);
-
-    for (const auto &entry : resultDict) {
-        cout << "Substring: " << entry.first << " - " << entry.second << endl;
-    }
-
-    return 0;
-}
+// int main() {
+//     string arr[] = {"he", "test", "she", "hers", "test2", "his"};
+//     string text = "ahishers";
+//     int k = sizeof(arr) / sizeof(arr[0]);
+//     unordered_map<string, int> resultDict;
+//
+//     AhoCorasick ac;
+//     ac.searchWords(arr, k, text, resultDict);
+//
+//     for (const auto &entry : resultDict) {
+//         cout << "Substring: " << entry.first << " - " << entry.second << endl;
+//     }
+//
+//     return 0;
+// }
