@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.29)
 project(cuda_string_search)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -16,3 +16,6 @@ add_executable(runTests tests/test.cpp)
 
 # Лінкуємо бібліотеку AhoCorasick і GTest
 target_link_libraries(runTests PRIVATE AhoCorasickLib gtest gtest_main pthread)
+
+add_executable(cuda_string_search
+    alg.cpp cuda_reduce.cu)
