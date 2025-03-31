@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../src/AhoCorasick.h"
+#include "../src/AhoCorasick.cpp"
 
 TEST(AhoCorasickTest, BasicMatch) {
     AhoCorasick ac;
