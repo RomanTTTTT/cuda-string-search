@@ -9,9 +9,9 @@
 using namespace std;
 
 struct AhoCorasick {
-    int g[MAX_STATES][ALPHABET_SIZE]; // Граф переходів
-    int f[MAX_STATES];                // Функція невдач
-    int out[MAX_STATES];              // Вихідні стани
+    int g[MAX_STATES][ALPHABET_SIZE];
+    int f[MAX_STATES];
+    int out[MAX_STATES];
     int states;
 
     __host__ AhoCorasick() {
@@ -63,7 +63,7 @@ struct AhoCorasick {
 };
 
 __global__ void searchKernel(int *g, int *f, int *out, char *text, int textLength, int *results) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= textLength) return;
 
     int currentState = 0;
@@ -76,7 +76,6 @@ __global__ void searchKernel(int *g, int *f, int *out, char *text, int textLengt
 
         currentState = g[currentState * ALPHABET_SIZE + ch];
         if (out[currentState] != 0) {
-            printf("Match found at state %d\n", currentState); // Debug
             atomicAdd(&results[currentState], 1);
         }
     }
@@ -110,7 +109,6 @@ int main() {
     searchKernel<<<blocksPerGrid, threadsPerBlock>>>(d_g, d_f, d_out, d_text, textLength, d_results);
 
     int results[MAX_STATES] = {0};
-    cudaDeviceSynchronize(); // Debug
     cudaMemcpy(results, d_results, MAX_STATES * sizeof(int), cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < ac.states; i++) {
@@ -124,11 +122,6 @@ int main() {
     cudaFree(d_out);
     cudaFree(d_text);
     cudaFree(d_results);
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        cout << "CUDA error: " << cudaGetErrorString(err) << endl;
-    } // Debug
 
     return 0;
 }
