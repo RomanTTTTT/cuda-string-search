@@ -22,6 +22,8 @@ target_link_libraries(runTests PRIVATE AhoCorasickLib gtest gtest_main pthread)
 # Створюємо окремий виконуваний файл cuda_reduce
 add_executable(cuda_reduce cuda_reduce.cu)
 
+add_executable(aho_corasick_cuda cuda/aho_corasick_cuda.cu)
+
 # Встановлюємо необхідні прапори для компілятора NVCC
 set_target_properties(cuda_reduce PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON)
