@@ -1,127 +1,172 @@
 #include <iostream>
 #include <vector>
 #include <queue>
-#include <cuda_runtime.h>
+#include <string>
 
-#define ALPHABET_SIZE 26
-#define MAX_STATES 5000
+#include <cuda_runtime.h>
 
 using namespace std;
 
-struct AhoCorasick {
-    int g[MAX_STATES][ALPHABET_SIZE];
-    int f[MAX_STATES];
-    int out[MAX_STATES];
-    int states;
-
-    __host__ AhoCorasick() {
-        states = 1;
-        memset(g, -1, sizeof(g));
-        memset(f, 0, sizeof(f));
-        memset(out, 0, sizeof(out));
+#define CHECK_CUDA(call) \
+    { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) { \
+            cerr << "CUDA error at " << __FILE__ << ":" << __LINE__ << " - " \
+                 << cudaGetErrorString(err) << endl; \
+            exit(1); \
+        } \
     }
 
-    __host__ void buildMatchingMachine(vector<string> &patterns) {
-        for (int i = 0; i < patterns.size(); i++) {
-            int currentState = 0;
-            for (char c : patterns[i]) {
-                int ch = c - 'a';
-                if (g[currentState][ch] == -1) {
-                    g[currentState][ch] = states++;
+__global__ void searchKernel(int *d_g, int *d_f, int *d_out, char *d_text, int textLen, int maxC, int *d_results, int numPatterns) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx >= textLen) return;
+
+    int state = 0;
+    for (int i = idx; i < textLen; i++) {
+        int ch = d_text[i] - 'a';
+        if (ch < 0 || ch >= maxC) {
+            state = 0;  // Reset state if character is out of range
+            continue;
+        }
+
+        while (state >= 0 && d_g[state * maxC + ch] == -1) {
+            state = d_f[state];
+        }
+        state = (state >= 0) ? d_g[state * maxC + ch] : 0;
+
+        if (state >= 0 && d_out[state]) {
+            for (int j = 0; j < numPatterns; j++) {
+                if (d_out[state] & (1 << j)) {
+                    atomicAdd(&d_results[j], 1);
                 }
-                currentState = g[currentState][ch];
+            }
+        }
+    }
+}
+
+class AhoCorasickCUDA {
+private:
+    static const int MAXC = 26;  // Increased for full alphabet support
+    vector<int> out, f, g;
+    int states;
+
+public:
+    AhoCorasickCUDA() : states(1) {
+        g.resize(MAXC, -1);
+        out.push_back(0);
+        f.push_back(0);
+    }
+
+    int getIndex(int state, int ch) { return state * MAXC + ch; }
+
+    void ensureCapacity(int state) {
+        int requiredSize = (state + 1) * MAXC;
+        if ((int)g.size() < requiredSize) {
+            g.resize(requiredSize, -1);
+            out.resize(state + 1, 0);
+            f.resize(state + 1, 0);
+        }
+    }
+
+    int buildMatchingMachine(vector<string> &arr) {
+        for (int i = 0; i < arr.size(); ++i) {
+            int currentState = 0;
+            for (char c : arr[i]) {
+                int ch = c - 'a';
+                if (ch < 0 || ch >= MAXC) continue;
+                ensureCapacity(currentState);
+                if (g[getIndex(currentState, ch)] == -1) {
+                    ensureCapacity(states);
+                    g[getIndex(currentState, ch)] = states++;
+                }
+                currentState = g[getIndex(currentState, ch)];
             }
             out[currentState] |= (1 << i);
         }
 
         queue<int> q;
-        for (int ch = 0; ch < ALPHABET_SIZE; ch++) {
-            if (g[0][ch] != -1) {
-                f[g[0][ch]] = 0;
-                q.push(g[0][ch]);
+        for (int ch = 0; ch < MAXC; ++ch) {
+            int index = getIndex(0, ch);
+            if (g[index] != -1) {
+                f[g[index]] = 0;
+                q.push(g[index]);
             } else {
-                g[0][ch] = 0;
+                g[index] = 0;
             }
         }
 
         while (!q.empty()) {
             int state = q.front();
             q.pop();
-            for (int ch = 0; ch < ALPHABET_SIZE; ch++) {
-                if (g[state][ch] != -1) {
-                    int failure = f[state];
-                    while (g[failure][ch] == -1 && failure != 0)
-                        failure = f[failure];
 
-                    f[g[state][ch]] = g[failure][ch];
-                    out[g[state][ch]] |= out[f[g[state][ch]]];
-                    q.push(g[state][ch]);
+            for (int ch = 0; ch < MAXC; ++ch) {
+                int index = getIndex(state, ch);
+                if (g[index] != -1) {
+                    int failure = f[state];
+                    while (g[getIndex(failure, ch)] == -1 && failure != 0)
+                        failure = f[failure];
+                    f[g[index]] = g[getIndex(failure, ch)];
+                    out[g[index]] |= out[f[g[index]]];
+                    q.push(g[index]);
                 }
             }
         }
+        return states;
+    }
+
+    void searchWords(vector<string> &arr, string text) {
+        buildMatchingMachine(arr);
+        int textLen = text.size();
+
+        int *d_g, *d_f, *d_out, *d_results;
+        char *d_text;
+        int numPatterns = arr.size();
+
+        CHECK_CUDA(cudaMalloc(&d_g, g.size() * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_f, f.size() * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_out, out.size() * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_text, textLen * sizeof(char)));
+        CHECK_CUDA(cudaMalloc(&d_results, numPatterns * sizeof(int)));
+
+        CHECK_CUDA(cudaMemcpy(d_g, g.data(), g.size() * sizeof(int), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(d_f, f.data(), f.size() * sizeof(int), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(d_out, out.data(), out.size() * sizeof(int), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemcpy(d_text, text.c_str(), textLen * sizeof(char), cudaMemcpyHostToDevice));
+        CHECK_CUDA(cudaMemset(d_results, 0, numPatterns * sizeof(int)));
+
+        int blockSize = 256;
+        int gridSize = (textLen + blockSize - 1) / blockSize;
+
+        searchKernel<<<gridSize, blockSize>>>(d_g, d_f, d_out, d_text, textLen, MAXC, d_results, numPatterns);
+        CHECK_CUDA(cudaPeekAtLastError());
+        CHECK_CUDA(cudaDeviceSynchronize());
+
+        vector<int> results(numPatterns, 0);
+        CHECK_CUDA(cudaMemcpy(results.data(), d_results, numPatterns * sizeof(int), cudaMemcpyDeviceToHost));
+        // for (int i = 0; i < numPatterns; i++) {
+        //    cout << "Substring: " << arr[i] << " - " << results[i] << endl;
+        //}
+        for (int i = 0; i < numPatterns; i++) {
+          if (results[i] > 0) {
+            cout << "1";
+          }
+          else {
+            cout << "0";
+          }
+        };
+        cout << endl;
+        CHECK_CUDA(cudaFree(d_g));
+        CHECK_CUDA(cudaFree(d_f));
+        CHECK_CUDA(cudaFree(d_out));
+        CHECK_CUDA(cudaFree(d_text));
+        CHECK_CUDA(cudaFree(d_results));
     }
 };
 
-__global__ void searchKernel(int *g, int *f, int *out, char *text, int textLength, int *results) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid >= textLength) return;
-
-    int currentState = 0;
-    for (int i = tid; i < textLength; i += blockDim.x * gridDim.x) {
-        char c = text[i];
-        int ch = c - 'a';
-
-        while (g[currentState * ALPHABET_SIZE + ch] == -1 && currentState != 0)
-            currentState = f[currentState];
-
-        currentState = g[currentState * ALPHABET_SIZE + ch];
-        if (out[currentState] != 0) {
-            atomicAdd(&results[currentState], 1);
-        }
-    }
-}
-
 int main() {
-    vector<string> patterns = {"he", "she", "his", "hers"};
+    vector<string> arr = {"he", "test", "she", "hers", "test2", "his"};
     string text = "ahishers";
-
-    AhoCorasick ac;
-    ac.buildMatchingMachine(patterns);
-
-    int *d_g, *d_f, *d_out, *d_results;
-    char *d_text;
-    int textLength = text.size();
-
-    cudaMalloc(&d_g, sizeof(ac.g));
-    cudaMalloc(&d_f, sizeof(ac.f));
-    cudaMalloc(&d_out, sizeof(ac.out));
-    cudaMalloc(&d_text, textLength * sizeof(char));
-    cudaMalloc(&d_results, MAX_STATES * sizeof(int));
-
-    cudaMemcpy(d_g, ac.g, sizeof(ac.g), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_f, ac.f, sizeof(ac.f), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_out, ac.out, sizeof(ac.out), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_text, text.c_str(), textLength * sizeof(char), cudaMemcpyHostToDevice);
-    cudaMemset(d_results, 0, MAX_STATES * sizeof(int));
-
-    int threadsPerBlock = 256;
-    int blocksPerGrid = (textLength + threadsPerBlock - 1) / threadsPerBlock;
-    searchKernel<<<blocksPerGrid, threadsPerBlock>>>(d_g, d_f, d_out, d_text, textLength, d_results);
-
-    int results[MAX_STATES] = {0};
-    cudaMemcpy(results, d_results, MAX_STATES * sizeof(int), cudaMemcpyDeviceToHost);
-
-    for (int i = 0; i < ac.states; i++) {
-        if (results[i] > 0) {
-            cout << "Pattern found at state " << i << ": " << results[i] << " times" << endl;
-        }
-    }
-
-    cudaFree(d_g);
-    cudaFree(d_f);
-    cudaFree(d_out);
-    cudaFree(d_text);
-    cudaFree(d_results);
-
+    AhoCorasickCUDA ac;
+    ac.searchWords(arr, text);
     return 0;
 }
